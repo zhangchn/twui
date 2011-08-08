@@ -16,8 +16,14 @@
 
 #import <Foundation/Foundation.h>
 
+extern NSString * const TUIAttributedStringBackgroundColorAttributeName;
+extern NSString * const TUIAttributedStringBackgroundFillStyleName;
+extern NSString * const TUIAttributedStringPreDrawBlockName;
+
 @class TUIFont;
 @class TUIColor;
+
+typedef void (^TUIAttributedStringPreDrawBlock)(NSAttributedString *attributedString, NSRange substringRange, CGRect rects[], CFIndex rectCount);
 
 typedef enum {		
 	TUILineBreakModeWordWrap = 0,
@@ -41,6 +47,11 @@ typedef enum {
 	TUITextAlignmentJustified,
 } TUITextAlignment;
 
+typedef enum {
+	TUIBackgroundFillStyleInline = 0,
+	TUIBackgroundFillStyleBlock,
+} TUIBackgroundFillStyle;
+
 @interface TUIAttributedString : NSMutableAttributedString
 
 + (TUIAttributedString *)stringWithString:(NSString *)string;
@@ -52,6 +63,8 @@ typedef enum {
 // write-only properties, reading will return nil
 @property (nonatomic, retain) TUIFont *font;
 @property (nonatomic, retain) TUIColor *color;
+@property (nonatomic, retain) TUIColor *backgroundColor;
+@property (nonatomic, assign) TUIBackgroundFillStyle backgroundFillStyle;
 @property (nonatomic, retain) NSShadow *shadow;
 @property (nonatomic, assign) TUITextAlignment alignment; // setting this will set lineBreakMode to word wrap, use setAlignment:lineBreakMode: for more control
 @property (nonatomic, assign) CGFloat kerning;
@@ -62,6 +75,9 @@ typedef enum {
 - (NSRange)_stringRange;
 - (void)setFont:(TUIFont *)font inRange:(NSRange)range;
 - (void)setColor:(TUIColor *)color inRange:(NSRange)range;
+- (void)setBackgroundColor:(TUIColor *)color inRange:(NSRange)range;
+- (void)setBackgroundFillStyle:(TUIBackgroundFillStyle)fillStyle inRange:(NSRange)range;
+- (void)setPreDrawBlock:(TUIAttributedStringPreDrawBlock)block inRange:(NSRange)range; // the pre-draw block is called before the text or text background has been drawn
 - (void)setShadow:(NSShadow *)shadow inRange:(NSRange)range;
 - (void)setKerning:(CGFloat)f inRange:(NSRange)range;
 - (void)setLineHeight:(CGFloat)f inRange:(NSRange)range;
