@@ -14,23 +14,23 @@
  limitations under the License.
  */
 
-#import "TUITextRenderer.h"
+#import "TUIView.h"
 
-@interface TUITextRenderer (Event)
+/**
+ * @brief An optional base for section header views
+ * 
+ * A view used as a section header may optionally extend this class,
+ * in which case the view will recieve messages about header state.
+ */
+@interface TUITableViewSectionHeader : TUIView {
+  
+  BOOL  _isPinnedToViewport;
+  
+}
 
-- (CFIndex)stringIndexForPoint:(CGPoint)p;
-- (CFIndex)stringIndexForEvent:(NSEvent *)event;
-- (void)resetSelection;
-- (CGRect)rectForCurrentSelection;
+-(void)headerWillBecomePinned;
+-(void)headerWillBecomeUnpinned;
 
-- (void)copy:(id)sender;
-
-@property (nonatomic, assign) id<TUITextRendererDelegate> delegate;
-
-@end
-
-@protocol TUITextRendererDelegate <NSObject>
-
-- (NSArray *)activeRangesForTextRenderer:(TUITextRenderer *)t;
+@property (readwrite, assign, getter=isPinnedToViewport) BOOL pinnedToViewport;
 
 @end

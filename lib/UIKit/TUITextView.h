@@ -17,8 +17,8 @@
 #import "TUIControl.h"
 #import "TUIGeometry.h"
 #import "TUIAttributedString.h"
-#import "TUITextEditor.h"
 
+@class TUITextEditor;
 @class TUIFont;
 @class TUIColor;
 
@@ -35,6 +35,12 @@
 	TUIColor *textColor;
 	TUITextAlignment textAlignment;
 	BOOL editable;
+	
+	BOOL spellCheckingEnabled;
+	NSInteger lastCheckToken;
+	NSArray *lastCheckResults;
+	NSTextCheckingResult *selectedTextCheckingResult;
+	BOOL autocorrectionEnabled;
 
 	TUIEdgeInsets contentInset;
 
@@ -45,6 +51,7 @@
 	
 	struct {
 		unsigned int delegateTextViewDidChange:1;
+		unsigned int delegateDoCommandBySelector:1;
 	} _textViewFlags;
 }
 
@@ -61,10 +68,14 @@
 
 @property (nonatomic, assign) NSRange selectedRange;
 @property (nonatomic, assign, getter=isEditable) BOOL editable;
+@property (nonatomic, assign, getter=isSpellCheckingEnabled) BOOL spellCheckingEnabled;
+@property (nonatomic, assign, getter=isAutocorrectionEnabled) BOOL autocorrectionEnabled;
 
 @property (nonatomic, copy) TUIViewDrawRect drawFrame;
 
 - (BOOL)hasText;
+
+- (BOOL)doCommandBySelector:(SEL)selector;
 
 @end
 
@@ -74,6 +85,7 @@
 @optional
 
 - (void)textViewDidChange:(TUITextView *)textView;
+- (BOOL)textView:(TUITextView *)textView doCommandBySelector:(SEL)commandSelector; // return YES if the implementation consumes the selector, NO if it should be passed up to super
 
 @end
 

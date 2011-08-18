@@ -131,6 +131,13 @@
 	}
 }
 
+- (void)viewDidMoveToWindow
+{
+	if(self.window != nil && rootView.layer.superlayer != [self layer]) {
+		[[self layer] addSublayer:rootView.layer];
+	}
+}
+
 - (TUIView *)viewForLocalPoint:(NSPoint)p
 {
 	return [rootView hitTest:p withEvent:nil];
@@ -250,6 +257,7 @@
 	_trackingView = [[self viewForEvent:event] retain];
 	[_trackingView rightMouseDown:event];
 	[TUITooltipWindow endTooltip];
+	[super rightMouseDown:event]; // we need to send this up the responder chain so that -menuForEvent: will get called for two-finger taps
 }
 
 - (void)rightMouseUp:(NSEvent *)event

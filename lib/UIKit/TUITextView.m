@@ -16,6 +16,16 @@
 
 #import "TUIKit.h"
 #import "TUITextView.h"
+#import "TUITextViewEditor.h"
+#import "TUITextRenderer+Event.h"
+
+@interface TUITextView ()
+- (void)_checkSpelling;
+- (void)_replaceMisspelledWord:(NSMenuItem *)menuItem;
+
+@property (nonatomic, retain) NSArray *lastCheckResults;
+@property (nonatomic, retain) NSTextCheckingResult *selectedTextCheckingResult;
+@end
 
 @implementation TUITextView
 
@@ -27,6 +37,10 @@
 @synthesize editable;
 @synthesize contentInset;
 @synthesize placeholder;
+@synthesize spellCheckingEnabled;
+@synthesize lastCheckResults;
+@synthesize selectedTextCheckingResult;
+@synthesize autocorrectionEnabled;
 
 - (void)_updateDefaultAttributes
 {
@@ -44,7 +58,7 @@
 
 - (Class)textEditorClass
 {
-	return [TUITextEditor class];
+	return [TUITextViewEditor class];
 }
 
 - (id)initWithFrame:(CGRect)frame
@@ -75,6 +89,8 @@
 	[font release];
 	[textColor release];
 	[placeholder release];
+	[lastCheckResults release];
+	[selectedTextCheckingResult release];
 	[super dealloc];
 }
 
@@ -101,6 +117,7 @@
 {
 	delegate = d;
 	_textViewFlags.delegateTextViewDidChange = [delegate respondsToSelector:@selector(textViewDidChange:)];
+	_textViewFlags.delegateDoCommandBySelector = [delegate respondsToSelector:@selector(textView:doCommandBySelector:)];
 }
 
 - (TUIResponder *)initialFirstResponder
@@ -204,7 +221,7 @@ static CAAnimation *ThrobAnimation()
 	
 	if(doMask) {
 		CGContextSaveGState(ctx);
-		CGContextClipToRoundRect(ctx, rect, floor(rect.size.height / 2));
+		CGContextClipToRoundRect(ctx, self.bounds, floor(rect.size.height / 2));
 	}
 	
 	[renderer draw];
@@ -227,12 +244,14 @@ static CAAnimation *ThrobAnimation()
 			renderer.attributedString = fake;
 			selection = NSMakeRange(0, 0);
 		}
-		
-		CGRect r = [renderer firstRectForCharacterRange:ABCFRangeFromNSRange(selection)];
-		r.size.width = 2.0;
-		r.size.height = round(r.size.height) - 2; // fudge
-		r.origin.x = roundf(r.origin.x);
-		r.origin.y = roundf(r.origin.y);
+
+		// Ugh. So this seems to be a decent approximation for the height of the cursor. It doesn't always match the native cursor but what ev.
+		CGRect r = CGRectIntegral([renderer firstRectForCharacterRange:ABCFRangeFromNSRange(selection)]);
+		r.size.width = 2.0f;
+		CGRect fontBoundingBox = CTFontGetBoundingBox(self.font.ctFont);
+		r.size.height = round(fontBoundingBox.origin.y + fontBoundingBox.size.height);
+		r.origin.y += floor(self.font.leading);
+//		NSLog(@"ascent: %f, descent: %f, leading: %f, cap height: %f, x-height: %f, bounding: %@", self.font.ascender, self.font.descender, self.font.leading, self.font.capHeight, self.font.xHeight, NSStringFromRect(CTFontGetBoundingBox(self.font.ctFont)));
 		
 		[TUIView setAnimationsEnabled:NO block:^{
 			cursor.frame = r;
@@ -255,6 +274,90 @@ static CAAnimation *ThrobAnimation()
 {
 	if(_textViewFlags.delegateTextViewDidChange)
 		[delegate textViewDidChange:self];
+	
+	if(spellCheckingEnabled) {
+		[self _checkSpelling];
+	}
+}
+
+- (void)_checkSpelling
+{	
+	lastCheckToken = [[NSSpellChecker sharedSpellChecker] requestCheckingOfString:self.text range:NSMakeRange(0, [self.text length]) types:NSTextCheckingTypeSpelling options:nil inSpellDocumentWithTag:0 completionHandler:^(NSInteger sequenceNumber, NSArray *results, NSOrthography *orthography, NSInteger wordCount) {
+		// This needs to happen on the main thread so that the user doesn't enter more text while we're changing the attributed string.
+		dispatch_async(dispatch_get_main_queue(), ^{
+			// we only care about the most recent results, ignore anything older
+			if(sequenceNumber != lastCheckToken) return;
+						
+			[[renderer backingStore] beginEditing];
+			
+			NSRange wholeStringRange = NSMakeRange(0, [self.text length]);
+			[[renderer backingStore] removeAttribute:(id)kCTUnderlineColorAttributeName range:wholeStringRange];
+			[[renderer backingStore] removeAttribute:(id)kCTUnderlineStyleAttributeName range:wholeStringRange];
+			
+			NSRange selectionRange = [self selectedRange];
+			for(NSTextCheckingResult *result in results) {
+				// Don't spell check the word they're typing, otherwise we're constantly marking it as misspelled and that's lame.
+				BOOL isActiveWord = (result.range.location + result.range.length == selectionRange.location) && selectionRange.length == 0;
+				if(isActiveWord) continue;
+				
+				[[renderer backingStore] addAttribute:(id)kCTUnderlineColorAttributeName value:(id)[TUIColor redColor].CGColor range:result.range];
+				[[renderer backingStore] addAttribute:(id)kCTUnderlineStyleAttributeName value:[NSNumber numberWithInteger:kCTUnderlineStyleThick | kCTUnderlinePatternDot] range:result.range];
+			}
+			
+			[[renderer backingStore] endEditing];
+			[renderer reset]; // make sure we reset so that the renderer uses our new attributes
+
+			[self setNeedsDisplay];
+			
+			self.lastCheckResults = results;
+		});
+	}];
+}
+
+- (NSMenu *)menuForEvent:(NSEvent *)event
+{
+	CFIndex stringIndex = [renderer stringIndexForEvent:event];
+	for(NSTextCheckingResult *result in lastCheckResults) {
+		if(stringIndex >= result.range.location && stringIndex <= result.range.location + result.range.length) {
+			self.selectedTextCheckingResult = result;
+			break;
+		}
+	}
+	
+	if(selectedTextCheckingResult == nil) return nil;
+		
+	NSMenu *menu = [[NSMenu alloc] initWithTitle:@""];
+	NSArray *guesses = [[NSSpellChecker sharedSpellChecker] guessesForWordRange:selectedTextCheckingResult.range inString:[self text] language:nil inSpellDocumentWithTag:0];
+	if(guesses.count > 0) {
+		for(NSString *guess in guesses) {
+			NSMenuItem *menuItem = [[NSMenuItem alloc] initWithTitle:guess action:@selector(_replaceMisspelledWord:) keyEquivalent:@""];
+			[menuItem setTarget:self];
+			[menuItem setRepresentedObject:guess];
+			[menu addItem:menuItem];
+			[menuItem release];
+		}
+	} else {
+		NSMenuItem *menuItem = [[NSMenuItem alloc] initWithTitle:@"No guesses" action:NULL keyEquivalent:@""];
+		[menu addItem:menuItem];
+		[menuItem release];
+	}
+	
+	return [menu autorelease];
+}
+
+- (void)_replaceMisspelledWord:(NSMenuItem *)menuItem
+{	
+	NSString *replacement = [menuItem representedObject];
+	[[renderer backingStore] beginEditing];
+	[[renderer backingStore] removeAttribute:(id)kCTUnderlineColorAttributeName range:selectedTextCheckingResult.range];
+	[[renderer backingStore] removeAttribute:(id)kCTUnderlineStyleAttributeName range:selectedTextCheckingResult.range];
+	[[renderer backingStore] replaceCharactersInRange:self.selectedTextCheckingResult.range withString:replacement];
+	[[renderer backingStore] endEditing];
+	[renderer reset];
+	
+	[self _textDidChange];
+	
+	self.selectedTextCheckingResult = nil;
 }
 
 - (NSRange)selectedRange
@@ -285,6 +388,15 @@ static CAAnimation *ThrobAnimation()
 - (BOOL)acceptsFirstResponder
 {
     return YES;
+}
+
+- (BOOL)doCommandBySelector:(SEL)selector
+{
+	if(_textViewFlags.delegateDoCommandBySelector) {
+		return [delegate textView:self doCommandBySelector:selector];
+	}
+	
+	return NO;
 }
 
 @end
